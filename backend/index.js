@@ -1,5 +1,7 @@
+require('dotenv').config()
 const express = require('express')
 const morgan = require('morgan')
+const Entry = require('./models/entry')
 const app = express()
 
 morgan.token('content', (request, response)=>{
@@ -42,27 +44,30 @@ let entries = [
 // })
 
 app.get('/api/persons', (request, response) => {
-  response.json(entries)
+    Entry.find({}).then(entries => {
+        response.json(entries)
+    })
 })
 
 app.get('/info',(request,response)=>{
     response.send(`Phonebook has info for ${entries.length} people <br\> ${new Date(Date.now()).toString()}`)
 })
 
-app.get('/api/persons/:id',(request,response)=> {
-    const id = request.params.id
-    const entry = entries.find(entry=>entry.id===id)
-    if (entry){
-        response.json(entry)
-    } else {
-        response.status(404).end()
-    }
+app.get('/api/persons/:id',(request,response,next)=> {
+    Entry.findById(request.params.id).then(entry=>{
+        if (entry){
+            response.json(entry)
+        } else {
+            response.status(404).end()
+        }
+    }).catch(error=>next(error))
 })
 
 app.delete('/api/persons/:id',(request,response)=>{
     const id = request.params.id
-    entries = entries.filter(entry=>entry.id!==id)
-    response.status(204).end()
+    Entry.deleteOne({_id: id}).then(()=>{
+        response.status(204).end()
+    })
 })
 
 const generateId = () => {
@@ -71,7 +76,7 @@ const generateId = () => {
     return String(maxId+1)
 }
 
-app.post('/api/persons',(request,response)=>{
+app.post('/api/persons',(request,response,next)=>{
     const body = request.body
     // console.log(body)
 
@@ -87,17 +92,44 @@ app.post('/api/persons',(request,response)=>{
         return response.status(400).json({error: 'duplicate name'})
     }
 
-    const entry = {
-        "id": generateId(),
+    const entry = new Entry({
         "name": body.name,
         "number": body.number,
-    }
-    entries = entries.concat(entry)
-    // console.log(entries)
-    response.json(entry)
+    })
+    entry.save().then(savedEntry=>{
+        response.json(savedEntry)
+    }).catch(error=>next(error))
 })
 
-const PORT = process.env.PORT || 3001
+app.put('/api/persons/:id',(request, response)=>{
+    const id = request.params.id
+    Entry.findById(id).then(entry=>{
+        entry.number = request.body.number
+        entry.save().then(savedEntry=>{
+            response.status(204).end()
+        })
+    })
+})
+
+const unknownEndpoint = (request, response) => {
+    response.status(404).send({ error: 'unknown endpoint' })
+  }
+  // handler of requests with unknown endpoint
+  app.use(unknownEndpoint)
+
+const errorHandler = (error,request,response,next) => {
+    console.error(error.message)
+
+    if  (error.name === 'CastError'){
+        return response.status(400).end()
+    } else if (error.name === 'ValidationError'){
+        return response.status(400).json({error: error.message})
+    }
+}
+
+app.use(errorHandler)
+
+const PORT = process.env.PORT
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
 })
